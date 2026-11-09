@@ -1,50 +1,64 @@
-const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+
+import express from "express";
 
 const app = express();
-app.use(express.json());
 
-// إعداد العميل مع الحفاظ على الجلسة واستخدام إعدادات مناسبة للسيرفرات
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+app.get("/", (req, res) => {
+    res.send("Diwaniya WhatsApp Service is Running");
 });
 
-client.on('qr', (qr) => {
-    console.log('--- QR CODE ---');
-    qrcode.generate(qr, { small: true });
+app.get("/health", (req, res) => {
+    res.json({
+        status: "online",
+        service: "Diwaniya WhatsApp"
+    });
 });
 
-client.on('ready', () => {
-    console.log('✅ تم الاتصال بالواتساب بنجاح وجاهز للإرسال!');
-});
-
-// نقطة النهاية (API Endpoint) لإرسال الـ OTP
-app.post('/send-otp', async (req, res) => {
-    const { phone, otp } = req.body;
-
-    if (!phone || !otp) {
-        return res.status(400).json({ status: 'error', message: 'يرجى إرسال phone و otp' });
-    }
-
+app.get("/redis-health", async (req, res) => {
     try {
-        const formattedPhone = `${phone.replace('+', '').trim()}@c.us`;
-        const message = `رمز التحقق الخاص بك هو: *${otp}*`;
+        const url = process.env.UPSTASH_REDIS_REST_URL;
+        const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-        await client.sendMessage(formattedPhone, message);
-        return res.json({ status: 'success', message: 'تم إرسال كود التحقق بنجاح' });
+        if (!url || !token) {
+            return res.status(500).json({
+                status: "error",
+                message: "Redis settings are missing"
+            });
+        }
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(["PING"])
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || result.result !== "PONG") {
+            return res.status(502).json({
+                status: "error",
+                message: "Redis connection failed"
+            });
+        }
+
+        res.json({
+            status: "connected",
+            redis: "PONG"
+        });
+
     } catch (error) {
-        console.error('خطأ في الإرسال:', error);
-        return res.status(500).json({ status: 'error', message: error.message });
+        res.status(500).json({
+            status: "error",
+            message: "Redis connection failed"
+        });
     }
 });
-
-client.initialize();
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 السيرفر يعمل على المنفذ ${PORT}`);
+
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
 });
